@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include "LRUCache.h"
 #include <string>
+#include <thread>
+#include <vector>
 
 // Test Instantiation & Empty Cache ---
 TEST(LRUCacheTest, EmptyCacheReturnsNullopt)
@@ -59,4 +61,44 @@ TEST(LRUCacheTest, UpdateExistingKeyUpdatesValueAndMovesToFront)
     EXPECT_EQ(result.value(), 15); // Verify value was updated
 
     EXPECT_FALSE(cache.get(2).has_value()); // Verify 2 was the one evicted
+}
+
+// Test Concurrent Puts ---
+TEST(LRUCacheTest, ConcurrentPutsDoNotCrash)
+{
+    // Create a cache large enough to hold all items so no eviction happens yet.
+    // We just want to test if simultaneous inserts corrupt the data structures.
+    const int num_threads = 10;
+    const int inserts_per_thread = 100;
+    LRUCache<int, std::string> cache(num_threads * inserts_per_thread);
+
+    std::vector<std::thread> threads;
+
+    // 1. Spawn multiple threads
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back([&cache, i, inserts_per_thread]() {
+            for (int j = 0; j < inserts_per_thread; ++j) {
+                // Generate a unique key for every single insertion
+                int key = i * inserts_per_thread + j;
+                cache.put(key, "value_" + std::to_string(key));
+            }
+        });
+    }
+
+    // 2. Wait for all threads to finish their work
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // 3. Verify the data is completely intact
+    for (int i = 0; i < num_threads; ++i) {
+        for (int j = 0; j < inserts_per_thread; ++j) {
+            int key = i * inserts_per_thread + j;
+            auto result = cache.get(key);
+            
+            // If the cache isn't thread-safe, some of these might mysteriously be missing
+            ASSERT_TRUE(result.has_value()) << "Missing key: " << key;
+            EXPECT_EQ(result.value(), "value_" + std::to_string(key));
+        }
+    }
 }
